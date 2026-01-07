@@ -1,0 +1,80 @@
+.neural-hero {
+    position: fixed;
+    inset: 0;
+    background: radial-gradient(
+      circle at top,
+      #0b1220,
+      #020617
+    );
+    overflow: hidden;
+    z-index: 1;
+  }
+  
+  /* CANVAS */
+  .neural-hero canvas {
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+  }
+  
+  /* HERO CONTENT */
+  .hero-content {
+    position: relative;
+    z-index: 2;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    pointer-events: none;
+    color: white;
+    text-align: center;
+  }
+  
+  /* TITLE */
+  .morph-title {
+    font-size: clamp(2.5rem, 5vw, 4.5rem);
+    font-weight: 700;
+    animation: breathe 4s ease-in-out infinite;
+  }
+  
+  /* SUBTITLE */
+  .hero-content p {
+    margin-top: 16px;
+    font-size: 1.1rem;
+    opacity: 0.7;
+  }
+  
+  /* TITLE BREATHING */
+  @keyframes breathe {
+    0% {
+      letter-spacing: 0px;
+      text-shadow: 0 0 6px rgba(59,130,246,0.3);
+      transform: translateY(0);
+    }
+    50% {
+      letter-spacing: 1.5px;
+      text-shadow:
+        0 0 12px rgba(59,130,246,0.8),
+        0 0 24px rgba(59,130,246,0.4);
+      transform: translateY(-3px);
+    }
+    100% {
+      letter-spacing: 0px;
+      text-shadow: 0 0 6px rgba(59,130,246,0.3);
+      transform: translateY(0);
+    }
+  }
+  
+  .morph-title:hover {
+    letter-spacing: 3px;
+    text-shadow:
+      0 0 20px rgba(59,130,246,1),
+      0 0 40px rgba(59,130,246,0.6);
+  }
+  
+  .neural-hero.fade-out {
+    opacity: 0;
+    /* pointer-events: none; */
+    transition: opacity 0.6s ease;
+  }
