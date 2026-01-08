@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -9,12 +9,16 @@ from app.schemas.chat import (
     ChatMessageRequest,
     ChatMessageResponse
 )
-from app.services.ai_service import AIService
+
+from app.services.ai_understanding import understand_message
+from app.services.ai_decision import decide_next_action
+from app.services.ai_response import generate_reply
+from app.services.ai_memory import update_summary
 from app.services.scoring_service import ScoringService
+
 
 router = APIRouter(prefix="/chat", tags=["Chat"])
 
-ai_service = AIService()
 scoring_service = ScoringService()
 
 
@@ -33,8 +37,10 @@ def start_chat(db: Session = Depends(get_db)):
 def send_message(payload: ChatMessageRequest, db: Session = Depends(get_db)):
 
     lead = db.query(Lead).filter(Lead.id == payload.lead_id).first()
+    if not lead:
+        raise HTTPException(status_code=404, detail="Invalid lead_id")
 
-    # 1️⃣ Save user message
+    # 1️⃣ Save USER message
     user_msg = ChatMessage(
         lead_id=lead.id,
         sender="user",
@@ -42,48 +48,81 @@ def send_message(payload: ChatMessageRequest, db: Session = Depends(get_db)):
     )
     db.add(user_msg)
 
-    # 2️⃣ AI analysis
-    ai_result = ai_service.analyze_message(payload.message)
-    print("RAW AI RESULT:", ai_result)
+    # 2️⃣ UNDERSTAND the message
+    understanding = understand_message(payload.message)
+    print("UNDERSTANDING:", understanding)
 
+    entities = understanding.get("entities", {})
 
-    # 3️⃣ Scoring
-    score = scoring_service.calculate_score(
-        ai_result["intent"],
-        ai_result["interest_level"]
+    lead.team_size = entities.get("team_size") or lead.team_size
+    lead.budget = entities.get("budget") or lead.budget
+    lead.timeline = entities.get("timeline") or lead.timeline
+    lead.industry = entities.get("industry") or lead.industry
+    lead.use_case = entities.get("use_case") or lead.use_case
+
+    lead.buying_signal = understanding.get("buying_signals", False)
+    lead.objection_type = understanding.get("objection_type")
+
+    # 3️⃣ DECIDE next action
+    decision = decide_next_action(
+        understanding=understanding,
+        lead_score=lead.score
     )
-    status = scoring_service.determine_status(score)
+    print("DECISION:", decision)
 
-    # 4️⃣ Update lead
-    lead.intent_level = ai_result["interest_level"]
-    lead.sentiment = ai_result["sentiment"]
-    lead.score += score
-    lead.status = status
+    # 4️⃣ SCORING
+    score_delta = scoring_service.calculate_score(
+        understanding["intent"],
+        understanding["interest_level"]
+    )
 
-    # 5️⃣ Save bot reply
+    lead.score += score_delta
+    lead.status = scoring_service.determine_status(lead.score)
+    lead.intent_level = understanding["interest_level"]
+    lead.sentiment = understanding["sentiment"]
+
+    # 5️⃣ GENERATE BOT reply (USES MEMORY)
+    bot_reply = generate_reply(
+        user_message=payload.message,
+        understanding=understanding,
+        decision=decision,
+        conversation_summary=lead.summary or ""
+    )
+
+    # 6️⃣ Save BOT message
     bot_msg = ChatMessage(
         lead_id=lead.id,
         sender="bot",
-        message=ai_result["suggested_reply"]
+        message=bot_reply
     )
     db.add(bot_msg)
 
+    # 7️⃣ UPDATE CONVERSATION MEMORY (⭐ STEP 2 CORE)
+    lead.summary = update_summary(
+        existing_summary=lead.summary,
+        user_message=payload.message,
+        bot_reply=bot_reply
+    )
+
+    # 8️⃣ COMMIT EVERYTHING TO DB
     db.commit()
 
-    # Print the updated values
-    print(f"\n{'='*50}")
-    print(f"User Message: {payload.message}")
-    print(f"New Score: {lead.score}")
-    print(f"Sentiment: {lead.sentiment}")
-    print(f"Status: {lead.status}")
-    print(f"Intent Level: {lead.intent_level}")
-    print(f"{'='*50}\n")
+    # 🔍 DEBUG LOG
+    print("\n" + "=" * 60)
+    print("USER:", payload.message)
+    print("INTENT:", understanding["intent"])
+    print("INTEREST:", understanding["interest_level"])
+    print("ACTION:", decision["action"])
+    print("SCORE:", lead.score)
+    print("STATUS:", lead.status)
+    print("SUMMARY:", lead.summary)
+    print("=" * 60 + "\n")
 
-    # 6️⃣ Respond
+    # 9️⃣ RESPOND TO FRONTEND
     return {
-        "reply": ai_result["suggested_reply"],
-        "intent": ai_result["intent"],
-        "sentiment": ai_result["sentiment"],
+        "reply": bot_reply,
+        "intent": understanding["intent"],
+        "sentiment": understanding["sentiment"],
         "score": lead.score,
         "status": lead.status
     }
